@@ -432,7 +432,7 @@ class NodeTable(collections.UserDict):
 					current_node = extract(int, line, ':')
 					NodeRecord(current_node, self)
 				elif line.startswith('a = '):
-					self[current_node].damage = extract(float, line.replace('.','').replace(',','.'), '=')
+					self[current_node].damage = extract(float, line.replace(',','.').strip().strip('.'), '=')
 				elif line.startswith('Base calculated moment of time'):
 					self[current_node].base_moment = extract(int, line.replace(',',''), ':')
 				elif line.startswith('reduced sterss component'):
@@ -546,7 +546,7 @@ def main():
 	ctt.parse_accumulated_fatigue_damage_file(list(filter(lambda a: a.startswith('Report (Accumulated Fatigue Damage)'), os.listdir()))[0])
 	if nnodes:
 		nn = list(map(lambda a: a.num, nt.get_damage_index(nnodes)))
-		save_in_workbook(ctt, nn, args.fname, args.limit)
+		save_in_workbook(ctt, nn, args.outfile, args.limit)
 	else:
 		save_in_workbook(ctt, args.l, args.fname, args.limit)
 	
