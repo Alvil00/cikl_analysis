@@ -14,10 +14,12 @@ import math
 def parse_args(arguments):
 	p = argparse.ArgumentParser('This is script to read an collect data from cycle vtu calculation')
 	pg = p.add_mutually_exclusive_group()
-	pg.add_argument('-n', type=int, default=10, help='number of extracted records')
+	pg.add_argument('-n', type=int, default=10, help='number of extracted records. default is 10')
 	pg.add_argument('-l', type=int, nargs='+', help='specified list of node numbers')
-	pg.add_argument('-c', action='store_false', help='collapse history history')
-	p.add_argument('--limit', type=float, default=1E-8, help='set the limit of extracted types of cycle')
+	pf = p.add_mutually_exclusive_group()
+	pf.add_argument('-c', action='store_false', help='collapse history history and insert new type cycles string in cell')
+	pf.add_argument('-a', action='store_true', help='add additional infromation into type cycles column')
+	p.add_argument('--limit', type=float, default=1E-8, help='set the limit of extracted types of cycle. default is 1E-8')
 	p.add_argument('--outfile', type=str, default='table.xlsx', help='name of output file, default = table.xlsx')
 	r = p.parse_args(arguments)
 	return r
@@ -623,7 +625,7 @@ class ElasticReducedStressManagerTable(collections.UserDict):
 							current_table = ElasticReducedStressTable(int(result.group(0)), self)
 							current_context = self.ElasticReducedStressFileLineContext.FIND_NUM_COMPONENT_NUM
 
-def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', limit=1E-8, is_expanded=True):
+def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', limit=1E-8, is_expanded=True, additional =False):
 	mb = openpyxl.Workbook()
 	chwidth = (("Тип цикла", 12),
 	          ("σFmax",     8.25),
@@ -653,9 +655,14 @@ def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', l
 		ct = manager_table[node]
 		for rownum, item in enumerate(filter(lambda a: a.a > limit, ct), 2):
 			if is_expanded and (item.first_id > mlen or item.second_id > mlen):
-				item.first_id = manager_table.elastic_reduced_stress_manager_table[node].search_real_id(item.sfmax)
-				item.second_id = manager_table.elastic_reduced_stress_manager_table[node].search_real_id(item.sfmin)
-			ms.cell(row=rownum, column=1).value = "{}-{}".format(item.first_id, item.second_id)
+				new_first_id = manager_table.elastic_reduced_stress_manager_table[node].search_real_id(item.sfmax)
+				new_second_id = manager_table.elastic_reduced_stress_manager_table[node].search_real_id(item.sfmin)
+				if additional:	
+					ms.cell(row=rownum, column=1).value = "{}-{} ({}-{})".format(item.first_id, item.second_id, new_first_id, new_second_id)
+				else:
+					ms.cell(row=rownum, column=1).value = "{}-{}".format(new_first_id, new_second_id)
+			else:
+				ms.cell(row=rownum, column=1).value = "{}-{}".format(item.first_id, item.second_id)
 			ms.cell(row=rownum, column=2).value = item.sfmax   
 			ms.cell(row=rownum, column=3).value = item.sfmin
 			ms.cell(row=rownum, column=4).value = item.saf
@@ -665,7 +672,9 @@ def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', l
 			ms.cell(row=rownum, column=8).value = item.ndop
 			ms.cell(row=rownum, column=9).value = item.n
 			ms.cell(row=rownum, column=10).value = item.a
-			is_empty = False	
+			is_empty = False
+		if manager_table.node_table[node].damage >= 1.0:
+			ms.sheet_properties.tabColor = openpyxl.styles.colors.Color('FF0000')
 		if not is_empty:
 			for cnum, (chvalue, cwidth) in enumerate(chwidth, 1):
 				hcell = ms.cell(row=1, column=cnum)
@@ -715,9 +724,9 @@ def main():
 	ctt.parse_accumulated_fatigue_damage_file(list(filter(lambda a: a.startswith('Report (Accumulated Fatigue Damage)'), os.listdir()))[0])
 	if nnodes:
 		nn = list(map(lambda a: a.num, nt.get_damage_index(nnodes)))
-		save_in_workbook(ctt, nn, args.outfile, args.limit, args.c)
 	else:
-		save_in_workbook(ctt, args.l, args.fname, args.limit, args.c)
+		nn = args.l
+	save_in_workbook(ctt, nn, args.outfile, args.limit, args.c or args.a, args.a)
 	
 	
 if __name__ == "__main__":
