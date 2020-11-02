@@ -9,6 +9,7 @@ import os
 import re
 import enum
 import argparse
+import math
 
 def parse_args(arguments):
 	p = argparse.ArgumentParser('This is script to read an collect data from cycle vtu calculation')
@@ -20,9 +21,31 @@ def parse_args(arguments):
 	r = p.parse_args(arguments)
 	return r
 
-class CycleTypeRecord():
+
+class ChildMixin():
+	def __init__(self, parent, parent_type, key=None):
+		if parent is None:
+			self._parent = None
+		elif isinstance(parent, parent_type):
+			self._parent=weakref.ref(parent)
+			if issubclass(parent_type, collections.UserList):
+				self._parent().append(self)
+			elif issubclass(parent_type, collections.UserDict):
+				self._parent()[key] = self
+		else:
+			raise ValueError
+	
+	@property
+	def parent(self):
+		if self._parent is None:
+			return None
+		else:
+			return self._parent()
+
+class CycleTypeRecord(ChildMixin):
 	
 	def __init__(self, parent, first_id, second_id, saf ,sfmax, sfmin, tmax, tmin, r, ndop, n, a):
+		super().__init__(parent, CycleTypeTable)
 		self._first_id = first_id
 		self._second_id = second_id
 		self._saf = saf
@@ -34,30 +57,23 @@ class CycleTypeRecord():
 		self._ndop = ndop
 		self._n = n
 		self._a = a
-		if parent is None:
-			self._parent = None
-		elif isinstance(parent, CycleTypeTable):
-			self._parent=weakref.ref(parent)
-			self._parent().append(self)
-		else:
-			raise ValueError
-	
-	@property
-	def parent(self):
-		if self._parent is None:
-			return None
-		else:
-			return self._parent()
-			
 	
 	@property
 	def first_id(self):
 		return self._first_id
 	
+	@first_id.setter
+	def first_id(self, value):
+		self._first_id = value
+	
 	@property
 	def second_id(self):
 		return self._second_id
 		
+	@second_id.setter
+	def second_id(self, value):
+		self._second_id = value
+	
 	@property
 	def saf(self):
 		return self._saf
@@ -95,36 +111,23 @@ class CycleTypeRecord():
 		return self._a
 	
 
-
-class CycleTypeTable(collections.UserList):
-		
+class CycleTypeTable(collections.UserList, ChildMixin):
+	OUTPUT_HEADER = "fid   sid  sfmax   sfmin   saf      tmin   tmax   r      ndop       n        a"
+	OUTPUT_FORMAT = "{fid:>3} - {sid:<3} {sfmax:>8.2f}{sfmin:>8.2f}{saf:>8.2f}{tmin:>7.1f}{tmax:>7.1f}{r:>7.2f}{ndop:>10.0f}{n:>10.1f} {a:>11.4e}"
 	def __init__(self, nodenum, parent=None):
 		self._nodenum = nodenum
 		super().__init__()
-		if parent is None:
-			self._parent = None
-		elif isinstance(parent, CycleTypeManagerTable):
-			self._parent=weakref.ref(parent)
-			self._parent()[nodenum] = self
-		else:
-			raise ValueError
+		super(collections.UserList, self).__init__(parent, CycleTypeManagerTable, nodenum)
 	
 	@property
 	def nodenum(self):
 		return self._nodenum
 	
-	@property
-	def parent(self):
-		if self._parent is None:
-			return None
-		else:
-			return self._parent()
-	
-	def print_table(self):
-		print("fid   sid  sfmax   sfmin   saf      tmin   tmax   r      ndop       n        a")
+	def print_table(self, limit=1E-8):
+		print(self.OUTPUT_HEADER)
 		for i in self:
-			if i.a > 1E-8:
-				print("{fid:>3} - {sid:<3} {sfmax:>8.2f}{sfmin:>8.2f}{saf:>8.2f}{tmin:>7.1f}{tmax:>7.1f}{r:>7.2f}{ndop:>10.0f}{n:>10.1f} {a:>11.4e}".format(fid=i.first_id, sid=i.second_id, saf=i.saf, n=i.n, a=i.a, sfmax=i.sfmax, sfmin=i.sfmin, tmin=i.tmin, tmax=i.tmax, r=i.r, ndop=i.ndop))
+			if i.a >= limit:
+				print(self.OUTPUT_FORMAT.format(fid=i.first_id, sid=i.second_id, saf=i.saf, n=i.n, a=i.a, sfmax=i.sfmax, sfmin=i.sfmin, tmin=i.tmin, tmax=i.tmax, r=i.r, ndop=i.ndop))
 
 class CycleTypeManagerTable(collections.UserDict):
 	class AccumulatedFatigueDamageFileLineContext(enum.Enum):
@@ -133,7 +136,7 @@ class CycleTypeManagerTable(collections.UserDict):
 		FIND_NODE_BM = 2
 		READ_RECORD = 3
 		
-	def __init__(self, node_table, local_reduced_stress_manager_table):
+	def __init__(self, node_table, local_reduced_stress_manager_table, elastic_reduced_stress_manager_table):
 		super().__init__()
 		if node_table is None:
 			self._node_table = None
@@ -149,6 +152,20 @@ class CycleTypeManagerTable(collections.UserDict):
 		else:
 			raise ValueError
 		
+		if elastic_reduced_stress_manager_table is None:
+			self._elastic_reduced_stress_manager_table = None
+		elif isinstance(elastic_reduced_stress_manager_table, ElasticReducedStressManagerTable):
+			self._elastic_reduced_stress_manager_table=weakref.ref(elastic_reduced_stress_manager_table)
+		else:
+			raise ValueError
+		
+	@property
+	def elastic_reduced_stress_manager_table(self):
+		if self._elastic_reduced_stress_manager_table is None:
+			return None
+		else:
+			return self._elastic_reduced_stress_manager_table()
+			
 	@property
 	def node_table(self):
 		if self._node_table is None:
@@ -204,32 +221,18 @@ class CycleTypeManagerTable(collections.UserDict):
 							current_table.sort(key = lambda a: a.a, reverse=True)
 							current_context = self.AccumulatedFatigueDamageFileLineContext.FIND_NODE_NUM
 	
-class LocalReducedStressRecord():
+class LocalReducedStressRecord(ChildMixin):
 	
-	def __init__(self, num, parent= None,temp:float=20.0, si:float=0.0, sj:float=0.0, sk:float=0.0):
+	def __init__(self, num, parent= None, temp:float=20.0, si:float=0.0, sj:float=0.0, sk:float=0.0):
 		self._num = num
 		self._temp = temp
 		self._list = [si, sj, sk, None, None, None]
-		if parent is None:
-			self._parent = None
-		elif isinstance(parent, LocalReducedStressTable):
-			self._parent=weakref.ref(parent)
-			self._parent()[num] = self
-		else:
-			raise ValueError
-	
-	@property
-	def parent(self):
-		if self._parent is None:
-			return None
-		else:
-			return self._parent()
+		super().__init__(parent, LocalReducedStressTable, num)
 	
 	@property
 	def num(self):
 		return self._num
 		
-	
 	@property
 	def temp(self):
 		return self._temp
@@ -266,32 +269,24 @@ class LocalReducedStressRecord():
 	
 	@property
 	def vec(self):
+		if self._list[3] is None:
+			self._list[3] = self._list[0] - self._list[1]
+		if self._list[4] is None:
+			self._list[4] = self._list[1] - self._list[2]
+		if self._list[5] is None:
+			self._list[5] = self._list[0] - self._list[2]
 		return self._list.copy()
 
-class LocalReducedStressTable(collections.UserDict):
+class LocalReducedStressTable(collections.UserDict, ChildMixin):
 	def __init__(self, nodenum, parent):
 		self._nodenum = nodenum
 		super().__init__()
-		if parent is None:
-			self._parent = None
-		elif isinstance(parent, LocalReducedStressManagerTable):
-			self._parent=weakref.ref(parent)
-			self._parent()[nodenum] = self
-		else:
-			raise ValueError
+		super(collections.UserDict, self).__init__(parent, LocalReducedStressManagerTable, nodenum)
 
-	
 	@property
 	def nodenum(self):
 		return self._nodenum
 	
-	@property
-	def parent(self):
-		if self._parent is None:
-			return None
-		else:
-			return self._parent()
-
 	def print_table(self):
 		print('id        temp      sij       sjk       sik')
 		for moment, m in self.items():
@@ -320,6 +315,11 @@ class LocalReducedStressManagerTable(collections.UserDict):
 			return None
 		else:
 			return self._node_table()
+	
+	@property
+	def length_of_tables(self):
+		for i in self.values():
+			return len(i)
 	
 	def parse_local_redused_stress_file(self, file, verbose=False):
 		current_context = self.LocalReducedStresFileLineContext.FIND_NODE_NUM
@@ -359,28 +359,14 @@ class LocalReducedStressManagerTable(collections.UserDict):
 							current_table = LocalReducedStressTable(int(result.group(0)), self)
 							current_context = self.LocalReducedStresFileLineContext.FIND_NODE_BM
 						
-class NodeRecord():
+class NodeRecord(ChildMixin):
 	def __init__(self, num, parent=None, damage:float=0.0, base_moment:int=0, component:int=0):
 		self._num = num
 		self._damage = damage
 		self._base_moment = base_moment
 		self._component = component
-		if parent is None:
-			self._parent = None
-		elif isinstance(parent, NodeTable):
-			self._parent=weakref.ref(parent)
-			self._parent()[num] = self
-		else:
-			raise ValueError
+		super().__init__(parent, NodeTable, num)
 
-			
-	@property
-	def parent(self):
-		if self._parent is None:
-			return None
-		else:
-			return self._parent()
-	
 	@property
 	def num(self):
 		return self._num
@@ -419,7 +405,8 @@ class NodeRecord():
 			raise ValueError
 		
 class NodeTable(collections.UserDict):
-	
+	OUTPUT_HEADER = 'nodenum   damage          bm    component'
+	OUTPUT_FORMAT = "{node:<10}{damage:<10.5e}{bm:6}{c:>6}"
 	def __init__(self):
 		super().__init__()
 		self._dindex = None
@@ -448,8 +435,8 @@ class NodeTable(collections.UserDict):
 		else:
 			return self._dindex[:num]
 	
-	def print_table(self, limit=0, sort_by_damage=False, ):
-		print('nodenum   damage          bm    component')
+	def print_table(self, limit=0, sort_by_damage=False):
+		print(self.OUTPUT_HEADER)
 		if sort_by_damage:
 			ld = list(self.items())
 			ld.sort(key=lambda a: a[1].damage,reverse=True)
@@ -457,14 +444,185 @@ class NodeTable(collections.UserDict):
 			ld = self.items()
 		if limit is None or limit <= 0:
 			for nodenum, node in ld:
-				print("{node:<10}{damage:<10.5e}{bm:6}{c:>6}".format(node=nodenum, damage=node.damage, bm=node.base_moment, c=node.component))
+				print(self.OUTPUT_FORMAT.format(node=nodenum, damage=node.damage, bm=node.base_moment, c=node.component))
 		else:
 			for num, (nodenum, node) in enumerate(ld):
 				if num >= limit:
 					break
-				print("{node:<10}{damage:<10.5e}{bm:6}{c:>6}".format(node=nodenum, damage=node.damage, bm=node.base_moment, c=node.component))
+				print(self.OUTPUT_FORMAT.format(node=nodenum, damage=node.damage, bm=node.base_moment, c=node.component))
+	
+	def print_table_by_list(self, list_of_nodes, sort_by_damage=True):
+		print(self.OUTPUT_HEADER)
+		ld = []
+		for item in list_of_nodes:
+			ld.append(self[item])
+		if sort_by_damage:
+			ld.sort(key=lambda a: a[1].damage,reverse=True)
+		for nodenum, node in ld:
+			print(self.OUTPUT_FORMAT.format(node=nodenum, damage=node.damage, bm=node.base_moment, c=node.component)) 
+
+
+class ElasticReducedStressRecord(ChildMixin):
+	def __init__(self, parent, num, temp, rpe, nu, ksi=None, lb=None, lh=None, sll=0.0, sfl=0.0):
+		super().__init__(parent, ElasticReducedStressTable, num)
+		self._num = num
+		self._temp = temp
+		self._rpe = rpe
+		self._nu = nu
+		self._ksi = ksi
+		self._lb = lb
+		self._lh = lh
+		self._sll = sll
+		self._sfl = sfl
+		self._rid = None
+
+	@property
+	def num(self):
+		return self._num
+	
+	@property
+	def temp(self):
+		return self._temp
+	
+	@property
+	def rpe(self):
+		return self._rpe
+	
+	@property
+	def nu(self):
+		return self._nu
+	
+	@property
+	def ksi(self):	
+		return self._ksi
+	
+	@property
+	def lb(self):
+		return self._lb
+	
+	@property
+	def lh(self):
+		return self._lh
+	
+	@property
+	def sll(self):
+		return self._sll
+	
+	@property
+	def sfl(self):
+		return self._sfl
+	
+	@property
+	def real_id(self):
+		if self.parent:
+			nn = self.parent.nodenum
+			lt = self.parent.parent.local_reduced_stress_manager_table[nn]
+			for key, values in lt.items():
+				if math.isclose(self.temp, values.temp, abs_tol=1E-4) and math.isclose(self.sfl,values.vec[2+self.parent.parent.node_table[nn].component],abs_tol=1E-4):
+					self._rid = key
+		return self._rid
 					
-def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', limit=1E-8):
+					
+	
+class ElasticReducedStressTable(collections.UserDict, ChildMixin):
+	def __init__(self, nodenum, parent):
+		self._nodenum = nodenum
+		super().__init__()
+		super(collections.UserDict, self).__init__(parent, ElasticReducedStressManagerTable, nodenum)
+
+	@property
+	def nodenum(self):
+		return self._nodenum
+	
+	
+	def search_real_id(self, stress):
+		for item in self.values():
+			if math.isclose(item.sfl, stress,abs_tol=1E-4):
+				return item.real_id
+	
+	def print_table(self):
+		pass
+		#print('id        temp      sij       sjk       sik')
+		#for moment, m in self.items():
+			#print("{moment:<10}{temp:<10.1f}{sij:<10.2f}{sjk:<10.2f}{sik:<10.2f}".format(moment=moment, temp=m.temp, sij=m.sij, sjk=m.sjk, sik=m.sik))
+					
+class ElasticReducedStressManagerTable(collections.UserDict):
+	class ElasticReducedStressFileLineContext(enum.Enum):
+		FIND_NODE_NUM = 0
+		FIND_NUM_COMPONENT_NUM = 1
+		FIND_NODE_BM = 2
+		READ_RECORD = 3
+		
+	def __init__(self, node_table, local_reduced_stress_manager_table):
+		super().__init__()
+		if node_table is None:
+			self._node_table = None
+		elif isinstance(node_table, NodeTable):
+			self._node_table=weakref.ref(node_table)
+		else:
+			raise ValueError
+		
+		if local_reduced_stress_manager_table is None:
+			self._local_reduced_stress_manager_table = None
+		elif isinstance(local_reduced_stress_manager_table,LocalReducedStressManagerTable):
+			self._local_reduced_stress_manager_table = weakref.ref(local_reduced_stress_manager_table)
+		else:
+			raise ValueError
+	
+	@property
+	def node_table(self):
+		if self._node_table is None:
+			return None
+		else:
+			return self._node_table()
+	
+	@property
+	def local_reduced_stress_manager_table(self):
+		if self._local_reduced_stress_manager_table is None:
+			return None
+		else:
+			return self._local_reduced_stress_manager_table()
+	
+	def parse_elastic_reduced_stress_file(self, file):
+		current_context = self.ElasticReducedStressFileLineContext.FIND_NODE_NUM
+		current_table = None
+		current_nodenum = None
+		nessesery_component = None
+		necessery_base_moment = None
+		find_node_num_pattern = re.compile('(?<=\>\sCalculation\snode\s)\d+')
+		find_node_component_pattern = re.compile('(?<=\>\sComponent\snumber\s)\d+')
+		find_node_basemoment_pattern = re.compile('(?<=\>\sBase\scalculated\smoment\sof\stime\s)\d+')
+		with open(file, mode='r') as f:
+			for line in f:
+				if current_context == self.ElasticReducedStressFileLineContext.FIND_NUM_COMPONENT_NUM:
+					result = re.search(find_node_component_pattern, line)
+					if result and nessesery_component == int(result.group(0)):
+						current_context = self.ElasticReducedStressFileLineContext.FIND_NODE_BM
+				elif current_context == self.ElasticReducedStressFileLineContext.FIND_NODE_BM:
+					result = re.search(find_node_basemoment_pattern, line)
+					if result and necessery_base_moment == int(result.group(0)):
+						current_context = self.ElasticReducedStressFileLineContext.READ_RECORD
+						header = 2
+				elif current_context == self.ElasticReducedStressFileLineContext.READ_RECORD:
+					if header > 0:
+						header -= 1
+					else:
+						temp_list = line.replace(',', '.').strip().split()
+						try:
+							ElasticReducedStressRecord(current_table, num=int(temp_list[0]), temp=float(temp_list[1]), rpe=float(temp_list[2]), nu=float(temp_list[3]), sll=float(temp_list[-3]), sfl=float(temp_list[-1]))
+						except (ValueError, IndexError ) as vi:
+							current_context = self.ElasticReducedStressFileLineContext.FIND_NODE_NUM
+				if current_context == self.ElasticReducedStressFileLineContext.FIND_NODE_NUM:
+					result = re.search(find_node_num_pattern, line)
+					if result:
+						current_nodenum = int(result.group(0))
+						if self.node_table.get(current_nodenum):
+							nessesery_component = self.node_table[current_nodenum].component
+							necessery_base_moment = self.node_table[current_nodenum].base_moment
+							current_table = ElasticReducedStressTable(int(result.group(0)), self)
+							current_context = self.ElasticReducedStressFileLineContext.FIND_NUM_COMPONENT_NUM
+
+def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', limit=1E-8, is_expanded=True):
 	mb = openpyxl.Workbook()
 	chwidth = (("Тип цикла", 12),
 	          ("σFmax",     8.25),
@@ -486,12 +644,17 @@ def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', l
                            wrap_text=True)
 	if necessery_nodes is None:
 		necessery_nodes = manager_table.keys()
+	mlen = manager_table.local_reduced_stress_manager_table.length_of_tables
 	for node in necessery_nodes:
 		is_empty = True
 		sheet_name = '{}n'.format(node)
 		ms = mb.create_sheet(sheet_name)
 		ct = manager_table[node]
 		for rownum, item in enumerate(filter(lambda a: a.a > limit, ct), 2):
+			if is_expanded and (item.first_id > mlen or item.second_id > mlen):
+				#pdb.set_trace()
+				item.first_id = manager_table.elastic_reduced_stress_manager_table[node].search_real_id(item.sfmax)
+				item.second_id = manager_table.elastic_reduced_stress_manager_table[node].search_real_id(item.sfmin)
 			ms.cell(row=rownum, column=1).value = "{}-{}".format(item.first_id, item.second_id)
 			ms.cell(row=rownum, column=2).value = item.sfmax   
 			ms.cell(row=rownum, column=3).value = item.sfmin
@@ -540,9 +703,15 @@ def main():
 	nt.parse_base_moments(list(filter(lambda a: a.startswith('BaseMoments'), os.listdir()))[0])
 	if nnodes:
 		nt.print_table(sort_by_damage=True, limit=nnodes)
+	else:
+		nt.print_table_by_list(args.l)
 	lmt = LocalReducedStressManagerTable(nt)
 	lmt.parse_local_redused_stress_file(list(filter(lambda a: a.startswith('Report (Local Reduced Stress)'), os.listdir()))[0])
-	ctt = CycleTypeManagerTable(nt, lmt)
+	
+	emt = ElasticReducedStressManagerTable(nt, lmt)
+	emt.parse_elastic_reduced_stress_file(list(filter(lambda a: a.startswith('Report (Elastic Reduced Stress)'), os.listdir()))[0])
+	
+	ctt = CycleTypeManagerTable(nt, lmt, emt)
 	ctt.parse_accumulated_fatigue_damage_file(list(filter(lambda a: a.startswith('Report (Accumulated Fatigue Damage)'), os.listdir()))[0])
 	if nnodes:
 		nn = list(map(lambda a: a.num, nt.get_damage_index(nnodes)))
