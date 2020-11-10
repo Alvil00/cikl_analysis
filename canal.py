@@ -1,3 +1,4 @@
+#coding:utf-8
 import sys
 import weakref
 import openpyxl
@@ -321,8 +322,7 @@ class LocalReducedStressManagerTable(collections.UserDict):
 	
 	@property
 	def length_of_tables(self):
-		for i in self.values():
-			return len(i)
+		return len(max(self.values(), key=lambda a: len(a)))
 	
 	def parse_local_redused_stress_file(self, file, verbose=False):
 		current_context = self.LocalReducedStresFileLineContext.FIND_NODE_NUM
@@ -521,7 +521,7 @@ class ElasticReducedStressRecord(ChildMixin):
 			nn = self.parent.nodenum
 			lt = self.parent.parent.local_reduced_stress_manager_table[nn]
 			for key, values in lt.items():
-				if math.isclose(self.temp, values.temp, abs_tol=1E-4) and math.isclose(self.sfl,values.vec[2+self.parent.parent.node_table[nn].component],abs_tol=1E-4):
+				if math.isclose(self.temp, values.temp, abs_tol=1E-2) and math.isclose(self.sll,values.vec[2+self.parent.parent.node_table[nn].component],abs_tol=1E-4):
 					self._rid = key
 		return self._rid
 					
@@ -657,10 +657,12 @@ def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', l
 			if is_expanded and (item.first_id > mlen or item.second_id > mlen):
 				new_first_id = manager_table.elastic_reduced_stress_manager_table[node].search_real_id(item.sfmax)
 				new_second_id = manager_table.elastic_reduced_stress_manager_table[node].search_real_id(item.sfmin)
-				if additional:	
+				if additional and new_first_id and new_second_id:	
 					ms.cell(row=rownum, column=1).value = "{}-{} ({}-{})".format(item.first_id, item.second_id, new_first_id, new_second_id)
 				else:
 					ms.cell(row=rownum, column=1).value = "{}-{}".format(new_first_id, new_second_id)
+				new_first_id = None
+				new_second_id = None
 			else:
 				ms.cell(row=rownum, column=1).value = "{}-{}".format(item.first_id, item.second_id)
 			ms.cell(row=rownum, column=2).value = item.sfmax   
@@ -676,26 +678,54 @@ def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', l
 		if manager_table.node_table[node].damage >= 1.0:
 			ms.sheet_properties.tabColor = openpyxl.styles.colors.Color('FF0000')
 		if not is_empty:
-			for cnum, (chvalue, cwidth) in enumerate(chwidth, 1):
-				hcell = ms.cell(row=1, column=cnum)
-				hcell.value = chvalue
-				ms.column_dimensions[hcell.column].width = cwidth
-			ms.cell(row=rownum+1, column=10).value = "=SUM(J2:J{})".format(rownum)
-			ms.merge_cells(start_row=rownum+1, start_column=1, end_row=rownum+1, end_column=9)
-			ms.cell(row=rownum+1, column=1).value = "Итоговая накопленная усталостная поврежденность"
-			for row in ms['A1:J{}'.format(rownum+1)]:
-				for cell in row:
-					cell.border = thin_border
-					cell.alignment = cent_alignment
-					cell.font = font
-					if cell.column in 'BCDEFH':
-						cell.number_format = '0'
-					elif cell.column == 'G':
-						cell.number_format = '0.00'
-					elif cell.column == 'I':
-						cell.number_format = '0.0'
-					elif cell.column == 'J':
-						cell.number_format = '0.0E+0'
+			if openpyxl.__version__[0] == '3':
+				for cnum, (chvalue, cwidth) in enumerate(chwidth, 1):
+					hcell = ms.cell(row=1, column=cnum)
+					hcell.value = chvalue
+					ms.column_dimensions[hcell.column_letter].width = cwidth
+				ms.cell(row=rownum+1, column=10).value = "=SUM(J2:J{})".format(rownum)
+				mc = ms.merge_cells(start_row=rownum+1, start_column=1, end_row=rownum+1, end_column=9)
+				ms.cell(row=rownum+1, column=1).value = "Итоговая накопленная усталостная поврежденность"
+				ms.cell(row=rownum+1, column=1).border = thin_border
+				ms.cell(row=rownum+1, column=1).alignment = cent_alignment
+				ms.cell(row=rownum+1, column=1).font = font
+				ms.cell(row=rownum+1, column=10).border = thin_border
+				ms.cell(row=rownum+1, column=10).alignment = cent_alignment
+				ms.cell(row=rownum+1, column=10).font = font
+				for row in ms['A1:J{}'.format(rownum)]:
+					for cell in row:
+						cell.border = thin_border
+						cell.alignment = cent_alignment
+						cell.font = font
+						if cell.column_letter in 'BCDEFH':
+							cell.number_format = '0'
+						elif cell.column_letter == 'G':
+							cell.number_format = '0.00'
+						elif cell.column_letter == 'I':
+							cell.number_format = '0.0'
+						elif cell.column_letter == 'J':
+							cell.number_format = '0.0E+0'
+			elif openpyxl.__version__[0] == '2':
+				for cnum, (chvalue, cwidth) in enumerate(chwidth, 1):
+					hcell = ms.cell(row=1, column=cnum)
+					hcell.value = chvalue
+					ms.column_dimensions[hcell.column].width = cwidth
+				ms.cell(row=rownum+1, column=10).value = "=SUM(J2:J{})".format(rownum)
+				ms.merge_cells(start_row=rownum+1, start_column=1, end_row=rownum+1, end_column=9)
+				ms.cell(row=rownum+1, column=1).value = "Итоговая накопленная усталостная поврежденность"
+				for row in ms['A1:J{}'.format(rownum+1)]:
+					for cell in row:
+						cell.border = thin_border
+						cell.alignment = cent_alignment
+						cell.font = font
+						if cell.column in 'BCDEFH':
+							cell.number_format = '0'
+						elif cell.column == 'G':
+							cell.number_format = '0.00'
+						elif cell.column == 'I':
+							cell.number_format = '0.0'
+						elif cell.column == 'J':
+							cell.number_format = '0.0E+0'
 	try:
 		mb.save("{}".format(worksheet_name))
 	except PermissionError:
@@ -709,19 +739,19 @@ def main():
 	else:
 		nnodes = None
 	nt = NodeTable()
-	nt.parse_base_moments(list(filter(lambda a: a.startswith('BaseMoments'), os.listdir()))[0])
+	nt.parse_base_moments(max(list(filter(lambda a: a.startswith('BaseMoments'), os.listdir())), key=os.path.getctime))
 	if nnodes:
 		nt.print_table(sort_by_damage=True, limit=nnodes)
 	else:
 		nt.print_table_by_list(args.l)
 	lmt = LocalReducedStressManagerTable(nt)
-	lmt.parse_local_redused_stress_file(list(filter(lambda a: a.startswith('Report (Local Reduced Stress)'), os.listdir()))[0])
+	lmt.parse_local_redused_stress_file(max(list(filter(lambda a: a.startswith('Report (Local Reduced Stress)'), os.listdir())), key=os.path.getctime))
 	
 	emt = ElasticReducedStressManagerTable(nt, lmt)
-	emt.parse_elastic_reduced_stress_file(list(filter(lambda a: a.startswith('Report (Elastic Reduced Stress)'), os.listdir()))[0])
+	emt.parse_elastic_reduced_stress_file(max(list(filter(lambda a: a.startswith('Report (Elastic Reduced Stress)'), os.listdir())), key=os.path.getctime))
 	
 	ctt = CycleTypeManagerTable(nt, lmt, emt)
-	ctt.parse_accumulated_fatigue_damage_file(list(filter(lambda a: a.startswith('Report (Accumulated Fatigue Damage)'), os.listdir()))[0])
+	ctt.parse_accumulated_fatigue_damage_file(max(list(filter(lambda a: a.startswith('Report (Accumulated Fatigue Damage)'), os.listdir())), key=os.path.getctime))
 	if nnodes:
 		nn = list(map(lambda a: a.num, nt.get_damage_index(nnodes)))
 	else:
