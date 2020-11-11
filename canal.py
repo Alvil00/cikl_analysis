@@ -18,7 +18,7 @@ def parse_args(arguments):
 	pg.add_argument('-n', type=int, default=10, help='number of extracted records. default is 10')
 	pg.add_argument('-l', type=int, nargs='+', help='specified list of node numbers')
 	pf = p.add_mutually_exclusive_group()
-	pf.add_argument('-c', action='store_false', help='collapse history history and insert new type cycles string in cell')
+	pf.add_argument('-c', action='store_false', help="Routine with this option doesn't expand history")
 	pf.add_argument('-a', action='store_true', help='add additional infromation into type cycles column')
 	p.add_argument('--limit', type=float, default=1E-8, help='set the limit of extracted types of cycle. default is 1E-8')
 	p.add_argument('--outfile', type=str, default='table.xlsx', help='name of output file, default = table.xlsx')
@@ -135,9 +135,9 @@ class CycleTypeTable(collections.UserList, ChildMixin):
 
 class CycleTypeManagerTable(collections.UserDict):
 	class AccumulatedFatigueDamageFileLineContext(enum.Enum):
-		FIND_NODE_NUM = 0
-		FIND_NUM_COMPONENT_NUM = 1
-		FIND_NODE_BM = 2
+		SEARCH_NODE_NUM = 0
+		SEARCH_NUM_COMPONENT_NUM = 1
+		SEARCH_NODE_BM = 2
 		READ_RECORD = 3
 		
 	def __init__(self, node_table, local_reduced_stress_manager_table, elastic_reduced_stress_manager_table):
@@ -186,32 +186,32 @@ class CycleTypeManagerTable(collections.UserDict):
 			
 	
 	def parse_accumulated_fatigue_damage_file(self, file):
-		current_context = self.AccumulatedFatigueDamageFileLineContext.FIND_NODE_NUM
+		current_context = self.AccumulatedFatigueDamageFileLineContext.SEARCH_NODE_NUM
 		current_table = None
 		current_nodenum = None
-		nessesery_component = None
-		necessery_base_moment = None
+		necessary_component = None
+		necessary_base_moment = None
 		find_node_num_pattern = re.compile('(?<=\>\sCalculation\snode:\s)\d+')
 		find_node_component_pattern = re.compile('(?<=\>\sComponent\snumber:\s)\d+')
 		find_node_basemoment_pattern = re.compile('(?<=\>\sBase\scalculated\smoment\sof\stime\s)\d+')
 		with open(file, mode='r') as f:
 			for line in f:
-				if current_context == self.AccumulatedFatigueDamageFileLineContext.FIND_NODE_NUM:
+				if current_context == self.AccumulatedFatigueDamageFileLineContext.SEARCH_NODE_NUM:
 					result = re.search(find_node_num_pattern, line)
 					if result:
 						current_nodenum = int(result.group(0))
 						if self.node_table.get(current_nodenum):
-							nessesery_component = self.node_table[current_nodenum].component
-							necessery_base_moment = self.node_table[current_nodenum].base_moment
+							necessary_component = self.node_table[current_nodenum].component
+							necessary_base_moment = self.node_table[current_nodenum].base_moment
 							current_table = CycleTypeTable(int(result.group(0)), self)
-							current_context = self.AccumulatedFatigueDamageFileLineContext.FIND_NUM_COMPONENT_NUM
-				elif current_context == self.AccumulatedFatigueDamageFileLineContext.FIND_NUM_COMPONENT_NUM:
+							current_context = self.AccumulatedFatigueDamageFileLineContext.SEARCH_NUM_COMPONENT_NUM
+				elif current_context == self.AccumulatedFatigueDamageFileLineContext.SEARCH_NUM_COMPONENT_NUM:
 					result = re.search(find_node_component_pattern, line)
-					if result and nessesery_component == int(result.group(0)):
-						current_context = self.AccumulatedFatigueDamageFileLineContext.FIND_NODE_BM
-				elif current_context == self.AccumulatedFatigueDamageFileLineContext.FIND_NODE_BM:
+					if result and necessary_component == int(result.group(0)):
+						current_context = self.AccumulatedFatigueDamageFileLineContext.SEARCH_NODE_BM
+				elif current_context == self.AccumulatedFatigueDamageFileLineContext.SEARCH_NODE_BM:
 					result = re.search(find_node_basemoment_pattern, line)
-					if result and necessery_base_moment == int(result.group(0)):
+					if result and necessary_base_moment == int(result.group(0)):
 						current_context = self.AccumulatedFatigueDamageFileLineContext.READ_RECORD
 						header = 2
 				elif current_context == self.AccumulatedFatigueDamageFileLineContext.READ_RECORD:
@@ -223,7 +223,7 @@ class CycleTypeManagerTable(collections.UserDict):
 							CycleTypeRecord(current_table, int(temp_list[0]), int(temp_list[2]), float(temp_list[7]), float(temp_list[5]), float(temp_list[6]), float(temp_list[9]), float(temp_list[8]), float(temp_list[10]), float(temp_list[19]), float(temp_list[20]), float(temp_list[21]))
 						except (ValueError, IndexError ) as vi:
 							current_table.sort(key = lambda a: a.a, reverse=True)
-							current_context = self.AccumulatedFatigueDamageFileLineContext.FIND_NODE_NUM
+							current_context = self.AccumulatedFatigueDamageFileLineContext.SEARCH_NODE_NUM
 	
 class LocalReducedStressRecord(ChildMixin):
 	
@@ -300,8 +300,8 @@ class LocalReducedStressTable(collections.UserDict, ChildMixin):
 
 class LocalReducedStressManagerTable(collections.UserDict):
 	class LocalReducedStresFileLineContext(enum.Enum):
-		FIND_NODE_NUM = 0
-		FIND_NODE_BM = 1
+		SEARCH_NODE_NUM = 0
+		SEARCH_NODE_BM = 1
 		READ_RECORD = 2
 		
 	def __init__(self, node_table):
@@ -325,20 +325,20 @@ class LocalReducedStressManagerTable(collections.UserDict):
 		return len(max(self.values(), key=lambda a: len(a)))
 	
 	def parse_local_redused_stress_file(self, file, verbose=False):
-		current_context = self.LocalReducedStresFileLineContext.FIND_NODE_NUM
+		current_context = self.LocalReducedStresFileLineContext.SEARCH_NODE_NUM
 		current_table = None
 		current_nodenum = None
-		necessery_base_moment = None
+		necessary_base_moment = None
 		find_node_num_pattern = re.compile('(?<=\>\sCalculation\snode\s)\d+')
 		find_node_basemoment_pattern = re.compile('(?<=\>\>moment\s)\d+(?=\s-\>\scalculation\sresults\sTable)')
 		start_header_passer = False
 		with open(file, mode='r') as f:
 			for line in f:
-				if current_context == self.LocalReducedStresFileLineContext.FIND_NODE_BM:
+				if current_context == self.LocalReducedStresFileLineContext.SEARCH_NODE_BM:
 					result = re.search(find_node_basemoment_pattern, line)
-					if result and necessery_base_moment == int(result.group(0)):
+					if result and necessary_base_moment == int(result.group(0)):
 						if verbose:
-							print('Find necessery_base_moment = {}'.format(necessery_base_moment))
+							print('Find necessary_base_moment = {}'.format(necessary_base_moment))
 						current_context = self.LocalReducedStresFileLineContext.READ_RECORD
 						start_header_passer = True
 				elif current_context == self.LocalReducedStresFileLineContext.READ_RECORD:
@@ -347,10 +347,10 @@ class LocalReducedStressManagerTable(collections.UserDict):
 							temp_list = line.replace(',','.').strip().split()
 							LocalReducedStressRecord(int(temp_list[0]), current_table, float(temp_list[1]), float(temp_list[5]), float(temp_list[6]), float(temp_list[7]))
 						except (ValueError, IndexError):
-							current_context = self.LocalReducedStresFileLineContext.FIND_NODE_NUM
+							current_context = self.LocalReducedStresFileLineContext.SEARCH_NODE_NUM
 					else:
 						start_header_passer = False
-				if current_context == self.LocalReducedStresFileLineContext.FIND_NODE_NUM:
+				if current_context == self.LocalReducedStresFileLineContext.SEARCH_NODE_NUM:
 					start_header_passer = False
 					result = re.search(find_node_num_pattern, line)
 					if result:
@@ -358,9 +358,9 @@ class LocalReducedStressManagerTable(collections.UserDict):
 						if self.node_table.get(current_nodenum):
 							if verbose:
 								print('Find node header = {}'.format(current_nodenum))
-							necessery_base_moment = self.node_table[current_nodenum].base_moment
+							necessary_base_moment = self.node_table[current_nodenum].base_moment
 							current_table = LocalReducedStressTable(int(result.group(0)), self)
-							current_context = self.LocalReducedStresFileLineContext.FIND_NODE_BM
+							current_context = self.LocalReducedStresFileLineContext.SEARCH_NODE_BM
 						
 class NodeRecord(ChildMixin):
 	def __init__(self, num, parent=None, damage:float=0.0, base_moment:int=0, component:int=0):
@@ -551,9 +551,9 @@ class ElasticReducedStressTable(collections.UserDict, ChildMixin):
 					
 class ElasticReducedStressManagerTable(collections.UserDict):
 	class ElasticReducedStressFileLineContext(enum.Enum):
-		FIND_NODE_NUM = 0
-		FIND_NUM_COMPONENT_NUM = 1
-		FIND_NODE_BM = 2
+		SEARCH_NODE_NUM = 0
+		SEARCH_NUM_COMPONENT_NUM = 1
+		SEARCH_NODE_BM = 2
 		READ_RECORD = 3
 		
 	def __init__(self, node_table, local_reduced_stress_manager_table):
@@ -587,23 +587,23 @@ class ElasticReducedStressManagerTable(collections.UserDict):
 			return self._local_reduced_stress_manager_table()
 	
 	def parse_elastic_reduced_stress_file(self, file):
-		current_context = self.ElasticReducedStressFileLineContext.FIND_NODE_NUM
+		current_context = self.ElasticReducedStressFileLineContext.SEARCH_NODE_NUM
 		current_table = None
 		current_nodenum = None
-		nessesery_component = None
-		necessery_base_moment = None
+		necessary_component = None
+		necessary_base_moment = None
 		find_node_num_pattern = re.compile('(?<=\>\sCalculation\snode\s)\d+')
 		find_node_component_pattern = re.compile('(?<=\>\sComponent\snumber\s)\d+')
 		find_node_basemoment_pattern = re.compile('(?<=\>\sBase\scalculated\smoment\sof\stime\s)\d+')
 		with open(file, mode='r') as f:
 			for line in f:
-				if current_context == self.ElasticReducedStressFileLineContext.FIND_NUM_COMPONENT_NUM:
+				if current_context == self.ElasticReducedStressFileLineContext.SEARCH_NUM_COMPONENT_NUM:
 					result = re.search(find_node_component_pattern, line)
-					if result and nessesery_component == int(result.group(0)):
-						current_context = self.ElasticReducedStressFileLineContext.FIND_NODE_BM
-				elif current_context == self.ElasticReducedStressFileLineContext.FIND_NODE_BM:
+					if result and necessary_component == int(result.group(0)):
+						current_context = self.ElasticReducedStressFileLineContext.SEARCH_NODE_BM
+				elif current_context == self.ElasticReducedStressFileLineContext.SEARCH_NODE_BM:
 					result = re.search(find_node_basemoment_pattern, line)
-					if result and necessery_base_moment == int(result.group(0)):
+					if result and necessary_base_moment == int(result.group(0)):
 						current_context = self.ElasticReducedStressFileLineContext.READ_RECORD
 						header = 2
 				elif current_context == self.ElasticReducedStressFileLineContext.READ_RECORD:
@@ -614,18 +614,18 @@ class ElasticReducedStressManagerTable(collections.UserDict):
 						try:
 							ElasticReducedStressRecord(current_table, num=int(temp_list[0]), temp=float(temp_list[1]), rpe=float(temp_list[2]), nu=float(temp_list[3]), sll=float(temp_list[-3]), sfl=float(temp_list[-1]))
 						except (ValueError, IndexError ) as vi:
-							current_context = self.ElasticReducedStressFileLineContext.FIND_NODE_NUM
-				if current_context == self.ElasticReducedStressFileLineContext.FIND_NODE_NUM:
+							current_context = self.ElasticReducedStressFileLineContext.SEARCH_NODE_NUM
+				if current_context == self.ElasticReducedStressFileLineContext.SEARCH_NODE_NUM:
 					result = re.search(find_node_num_pattern, line)
 					if result:
 						current_nodenum = int(result.group(0))
 						if self.node_table.get(current_nodenum):
-							nessesery_component = self.node_table[current_nodenum].component
-							necessery_base_moment = self.node_table[current_nodenum].base_moment
+							necessary_component = self.node_table[current_nodenum].component
+							necessary_base_moment = self.node_table[current_nodenum].base_moment
 							current_table = ElasticReducedStressTable(int(result.group(0)), self)
-							current_context = self.ElasticReducedStressFileLineContext.FIND_NUM_COMPONENT_NUM
+							current_context = self.ElasticReducedStressFileLineContext.SEARCH_NUM_COMPONENT_NUM
 
-def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', limit=1E-8, is_expanded=True, additional =False):
+def save_in_workbook(manager_table, necessary_nodes=None, worksheet_name='ma', limit=1E-8, is_expanded=True, additional =False):
 	mb = openpyxl.Workbook()
 	chwidth = (("Тип цикла", 12),
 	          ("σFmax",     8.25),
@@ -645,10 +645,10 @@ def save_in_workbook(manager_table, necessery_nodes=None, worksheet_name='ma', l
 	cent_alignment = Alignment(horizontal="center",
                            vertical="center",
                            wrap_text=True)
-	if necessery_nodes is None:
-		necessery_nodes = manager_table.keys()
+	if necessary_nodes is None:
+		necessary_nodes = manager_table.keys()
 	mlen = manager_table.local_reduced_stress_manager_table.length_of_tables
-	for node in necessery_nodes:
+	for node in necessary_nodes:
 		is_empty = True
 		sheet_name = '{}n'.format(node)
 		ms = mb.create_sheet(sheet_name)
