@@ -11,7 +11,13 @@ import re
 import enum
 import argparse
 import math
-
+try:
+	import numpy as np
+	import matplotlib.pyplot as plt
+except ImportError:
+	np = None
+	plt = None
+	
 def parse_args(arguments):
 	p = argparse.ArgumentParser('This is script to read an collect data from cycle vtu calculation')
 	pg = p.add_mutually_exclusive_group()
@@ -47,7 +53,7 @@ class ChildMixin():
 			return self._parent()
 
 class CycleTypeRecord(ChildMixin):
-	
+	__slots__ = ['_first_id', '_second_id', '_saf', '_sfmax', '_sfmin', '_tmax', '_tmin', '_r', '_ndop', '_n', '_a', '_parent']
 	def __init__(self, parent, first_id, second_id, saf ,sfmax, sfmin, tmax, tmin, r, ndop, n, a):
 		super().__init__(parent, CycleTypeTable)
 		self._first_id = first_id
@@ -226,7 +232,7 @@ class CycleTypeManagerTable(collections.UserDict):
 							current_context = self.AccumulatedFatigueDamageFileLineContext.SEARCH_NODE_NUM
 	
 class LocalReducedStressRecord(ChildMixin):
-	
+	__slots__ = ['_num', '_temp', '_list', '_parent']
 	def __init__(self, num, parent= None, temp:float=20.0, si:float=0.0, sj:float=0.0, sk:float=0.0):
 		self._num = num
 		self._temp = temp
@@ -364,6 +370,7 @@ class LocalReducedStressManagerTable(collections.UserDict):
 						
 class NodeRecord(ChildMixin):
 	def __init__(self, num, parent=None, damage:float=0.0, base_moment:int=0, component:int=0):
+		__slots__ = ['_num', '_damage', '_base_moment', '_component', '_parent']
 		self._num = num
 		self._damage = damage
 		self._base_moment = base_moment
@@ -466,6 +473,7 @@ class NodeTable(collections.UserDict):
 
 
 class ElasticReducedStressRecord(ChildMixin):
+	__slots__ = ['_parent', '_num', '_temp', '_rpe', '_nu', '_ksi', '_lb', '_lh', '_sll', '_sfl', '_rid']
 	def __init__(self, parent, num, temp, rpe, nu, ksi=None, lb=None, lh=None, sll=0.0, sfl=0.0):
 		super().__init__(parent, ElasticReducedStressTable, num)
 		self._num = num
@@ -481,42 +489,52 @@ class ElasticReducedStressRecord(ChildMixin):
 
 	@property
 	def num(self):
+		"""ДМВ"""
 		return self._num
 	
 	@property
 	def temp(self):
+		"""T, °C"""
 		return self._temp
 	
 	@property
 	def rpe(self):
+		"""Rpe, МПа"""
 		return self._rpe
 	
 	@property
 	def nu(self):
+		"""ν"""
 		return self._nu
 	
 	@property
-	def ksi(self):	
+	def ksi(self):
+		"""ξ"""
 		return self._ksi
 	
 	@property
 	def lb(self):
+		"""lb"""
 		return self._lb
 	
 	@property
 	def lh(self):
+		"""lh"""
 		return self._lh
 	
 	@property
 	def sll(self):
+		"""σLl, МПа"""
 		return self._sll
 	
 	@property
 	def sfl(self):
+		"""σFl, МПа"""
 		return self._sfl
 	
 	@property
 	def real_id(self):
+		"""РМВ"""
 		if self.parent:
 			nn = self.parent.nodenum
 			lt = self.parent.parent.local_reduced_stress_manager_table[nn]
@@ -548,6 +566,20 @@ class ElasticReducedStressTable(collections.UserDict, ChildMixin):
 		#print('id        temp      sij       sjk       sik')
 		#for moment, m in self.items():
 			#print("{moment:<10}{temp:<10.1f}{sij:<10.2f}{sjk:<10.2f}{sik:<10.2f}".format(moment=moment, temp=m.temp, sij=m.sij, sjk=m.sjk, sik=m.sik))
+	
+	def plot_graph(self, x_entity, *y_entities):
+		if np and plt:
+			v = self.values()
+			x_values = np.array(list(map(x_entity.fget, v)))
+			plt.xlabel(x_entity.__doc__)
+			for i in y_entities:
+				y_value = np.array(list(map(i.fget, v)))
+				plt.plot(x_values, y_value, linestyle='-', marker='.', markersize=1)
+			plt.legend(list(map(lambda a: a.__doc__ ,y_entities)))
+			plt.grid(True)
+			plt.show()
+		else:
+			print('NumPy and Matplotlib Import error for graph')
 					
 class ElasticReducedStressManagerTable(collections.UserDict):
 	class ElasticReducedStressFileLineContext(enum.Enum):
@@ -731,7 +763,9 @@ def save_in_workbook(manager_table, necessary_nodes=None, worksheet_name='ma', l
 	except PermissionError:
 		print('ERROR: Please close the excel file')
 	
-		
+
+
+
 def main():
 	args = parse_args(sys.argv[1:])
 	if not args.l:
@@ -757,7 +791,7 @@ def main():
 	else:
 		nn = args.l
 	save_in_workbook(ctt, nn, args.outfile, args.limit, args.c or args.a, args.a)
-	
+	#emt[nn[0]].plot_graph(ElasticReducedStressRecord.num, ElasticReducedStressRecord.sll, ElasticReducedStressRecord.sfl)
 	
 if __name__ == "__main__":
 	main()
