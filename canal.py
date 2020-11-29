@@ -1,4 +1,4 @@
-#coding:utf-8
+#coding: utf-8
 import sys
 import weakref
 import openpyxl
@@ -14,6 +14,8 @@ import math
 try:
 	import numpy as np
 	import matplotlib.pyplot as plt
+	from matplotlib.widgets import RadioButtons as plt_rb
+	from matplotlib.lines import Line2D
 except ImportError:
 	np = None
 	plt = None
@@ -494,7 +496,7 @@ class ElasticReducedStressRecord(ChildMixin):
 	
 	@property
 	def temp(self):
-		"""T, °C"""
+		u"""T, °C"""
 		return self._temp
 	
 	@property
@@ -504,7 +506,7 @@ class ElasticReducedStressRecord(ChildMixin):
 	
 	@property
 	def nu(self):
-		"""ν"""
+		u"""ν"""
 		return self._nu
 	
 	@property
@@ -524,12 +526,12 @@ class ElasticReducedStressRecord(ChildMixin):
 	
 	@property
 	def sll(self):
-		"""σLl, МПа"""
+		"""(σL)l, МПа"""
 		return self._sll
 	
 	@property
 	def sfl(self):
-		"""σFl, МПа"""
+		"""(σF)l, МПа"""
 		return self._sfl
 	
 	@property
@@ -542,8 +544,15 @@ class ElasticReducedStressRecord(ChildMixin):
 				if math.isclose(self.temp, values.temp, abs_tol=1E-2) and math.isclose(self.sll,values.vec[2+self.parent.parent.node_table[nn].component],abs_tol=1E-4):
 					self._rid = key
 		return self._rid
-					
-					
+	
+	def print_info(self):
+		st = type(self)
+		for prop in st.num, st.temp, st.rpe, st.nu, st.ksi, st.lb, st.lh, st.sll, st.sfl, st.real_id:
+			if prop.fget(self) is not None:
+				print(u"{:10}: {:>14}".format(prop.fget.__doc__, prop.fget(self)))
+			else:
+				print(u"{:10}:              -".format(prop.fget.__doc__))
+		print('')
 	
 class ElasticReducedStressTable(collections.UserDict, ChildMixin):
 	def __init__(self, nodenum, parent):
@@ -567,16 +576,51 @@ class ElasticReducedStressTable(collections.UserDict, ChildMixin):
 		#for moment, m in self.items():
 			#print("{moment:<10}{temp:<10.1f}{sij:<10.2f}{sjk:<10.2f}{sik:<10.2f}".format(moment=moment, temp=m.temp, sij=m.sij, sjk=m.sjk, sik=m.sik))
 	
+
+	
 	def plot_graph(self, x_entity, *y_entities):
 		if np and plt:
+			ismarkered = False
+			def __onrb(label):
+				nonlocal plots
+				nonlocal ismarkered
+				if label == 'off':
+					ms = 0.0
+					ismarkered = False
+				elif label == 'on':
+					ms = 8.5
+					ismarkered = True
+				for plot in plots:
+					plot[0].set_markersize(ms)
+				plt.draw()
+			
+			def __onpick(event):
+				nonlocal ismarkered
+				if ismarkered and isinstance(event.artist, Line2D):
+					ind = event.ind
+					if len(ind) == 1:
+						xdata = event.artist.get_xdata()[ind][0]
+						srec = self[xdata]
+						srec.print_info()
+						
+			
+			fig, ax = plt.subplots()
+			ax.set_title('Узел {}'.format(self.nodenum))
+			plt.subplots_adjust(left = 0.2)
 			v = self.values()
 			x_values = np.array(list(map(x_entity.fget, v)))
-			plt.xlabel(x_entity.__doc__)
+			ax.set_xlabel(x_entity.__doc__)
+			plots = []
 			for i in y_entities:
 				y_value = np.array(list(map(i.fget, v)))
-				plt.plot(x_values, y_value, linestyle='-', marker='.', markersize=1)
-			plt.legend(list(map(lambda a: a.__doc__ ,y_entities)))
-			plt.grid(True)
+				plots.append(ax.plot(x_values, y_value, linestyle='-', marker='.', markersize=0, picker=5))
+			ax.legend(list(map(lambda a: a.__doc__ ,y_entities)))
+			ax.grid(True)
+			rax = plt.axes([0.02, 0.775, 0.08, 0.08])
+			rax.set_title('points')
+			rb = plt_rb(rax, ('off', 'on'))
+			rb.on_clicked(__onrb)
+			fig.canvas.mpl_connect('pick_event', __onpick)
 			plt.show()
 		else:
 			print('NumPy and Matplotlib Import error for graph')
@@ -617,6 +661,13 @@ class ElasticReducedStressManagerTable(collections.UserDict):
 			return None
 		else:
 			return self._local_reduced_stress_manager_table()
+			
+	@staticmethod
+	def _read_int_wich_may_be_a_dash(value):
+		try:
+			return int(value)
+		except ValueError:
+			return None
 	
 	def parse_elastic_reduced_stress_file(self, file):
 		current_context = self.ElasticReducedStressFileLineContext.SEARCH_NODE_NUM
@@ -644,7 +695,11 @@ class ElasticReducedStressManagerTable(collections.UserDict):
 					else:
 						temp_list = line.replace(',', '.').strip().split()
 						try:
-							ElasticReducedStressRecord(current_table, num=int(temp_list[0]), temp=float(temp_list[1]), rpe=float(temp_list[2]), nu=float(temp_list[3]), sll=float(temp_list[-3]), sfl=float(temp_list[-1]))
+							ksi = self._read_int_wich_may_be_a_dash(temp_list[4])
+							lb = self._read_int_wich_may_be_a_dash(temp_list[5])
+							lh = self._read_int_wich_may_be_a_dash(temp_list[6])
+							ElasticReducedStressRecord(current_table, num=int(temp_list[0]), temp=float(temp_list[1]), rpe=float(temp_list[2]), nu=float(temp_list[3]),	sll=float(temp_list[-3]), sfl=float(temp_list[-1]), ksi=ksi, lb=lb, lh=lh)
+														
 						except (ValueError, IndexError ) as vi:
 							current_context = self.ElasticReducedStressFileLineContext.SEARCH_NODE_NUM
 				if current_context == self.ElasticReducedStressFileLineContext.SEARCH_NODE_NUM:
@@ -793,5 +848,6 @@ def main():
 	save_in_workbook(ctt, nn, args.outfile, args.limit, args.c or args.a, args.a)
 	#emt[nn[0]].plot_graph(ElasticReducedStressRecord.num, ElasticReducedStressRecord.sll, ElasticReducedStressRecord.sfl)
 	
+
 if __name__ == "__main__":
 	main()
